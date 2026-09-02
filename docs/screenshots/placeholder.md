@@ -1,0 +1,1 @@
+- Screen shot of AD home lab build.
