@@ -97,7 +97,7 @@ Examples include bulk user creation from CSV, automated onboarding, and offboard
 <!-- A created user account's properties -->
 <!-- A Group Policy Object you configured -->
 <!-- A client successfully joined to the domain -->
-*Add AD forest to server. ![AD in server window]()
+*Add AD forest to server. ![AD in server window](docs/screenshots/AD_server_role_assignment.png)
 
 *DHCP Installation via Powershell in AD. ![Enabling DHCP in lab.local](docs/screenshots/DHCP_Instalation.png)
 
