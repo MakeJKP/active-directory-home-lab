@@ -20,13 +20,34 @@
   ```powershell
   Set-DhcpServerv4OptionValue -ScopeId 192.168.100.0 -DnsServer 192.168.100.10 -DnsDomain "lab.local"
   ```
-*Clear post install flags and restart service*
+*Clear post install flags and restart service.*
   ```powershell
   Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\ServerManager\Roles\12" -Name ConfigurationState -Value 2
   Restart-Service DHCPServer
   ```
-*Verify*
+*Verify.*
   ```powershell
   Get-DhcpServerv4Scope
   Get-DhcpServerInDC
-```
+  ```
+*Remove static IP address and enable DHCP for client computers.*
+  ```powershell
+  Remove-NetIPAddress -InterfaceAlias "Ethernet" -AddressFamily IPv4 -Confirm:$false
+  Set-NetIPInterface -InterfaceAlias "Ethernet" -Dhcp Enabled
+  Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ResetServerAddresses
+  ipconfig /renew
+  ```
+*Create DNS forwarding Functionality.*
+  ```powershell
+  Add-DnsServerForwarder -IPAddress 8.8.8.8, 1.1.1.1
+  Get-DnsServerForwarder
+  ```
+*Create DHCP backup.*
+  ```powershell
+  Export-DhcpServer -File "C:\Backup\dhcp-config.xml" -Leases -Force
+  ```
+*Verify.*
+  ```powershell
+  Get-ChildItem C:\Backup
+  ```
+
