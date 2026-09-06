@@ -45,8 +45,8 @@ A parent `LabUsers` OU with child OUs for IT, HR, Finance, and Operations. Users
 
 | Document | Contents |
 |---|---|
-| [DHCP installation and configuration](docs/dhcp-configuration.md) | Command log for the DHCP role, scope, options, forwarders, and backup |
-| [Active Directory users and OUs](docs/active-directory-users-and-ous.md) | Command log for the OU structure and the bulk provisioning script |
+| [Domain controller and Active Directory](docs/DC01_Powershell.md) | Command log for the OU structure and the bulk provisioning script |
+| [DHCP installation and configuration](docs/DHCP_Powershell.md) | Command log for the DHCP role, scope, options, forwarders, and backup |
 
 Each document records the commands actually used, the reasoning behind them, and a troubleshooting section covering problems encountered during the build and how they were diagnosed.
 
