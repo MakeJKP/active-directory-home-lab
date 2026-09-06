@@ -113,7 +113,7 @@ Import-Csv C:\Scripts\newusers.csv
 
 **Domain join attempted on the domain controller**
 
-*Add-Computer -DomainName "lab.local" -Restart returned Cannot add computer 'DC01' to domain 'lab.local' because it is already in that domain. A domain controller is inherently a member of the domain it hosts, so the join command has nothing to do there. It belongs on member clients only. The error was a reminder to check which machine the session is actually connected to before running host-level commands.
+*Add-Computer -DomainName "lab.local" -Restart returned Cannot add computer 'DC01' to domain 'lab.local' because it is already in that domain. A domain controller is inherently a member of the domain it hosts, so the join command has nothing to do there. It belongs on member clients only. The error was a reminder to check which machine the session is actually connected to before running host-level commands.*
 
 **Users created outside any OU**
 
@@ -123,7 +123,7 @@ Import-Csv C:\Scripts\newusers.csv
   ```
 **Silent failures from misspelled properties and variables**
 
-Select-Object Name, DistiguishedName returned a column of empty {} values rather than an error. PowerShell does not validate property names against the object, and it creates any variable it sees on first use, so a typo in either produces no error and no output. Misspelled cmdlet names fail loudly; misspelled properties and variables fail quietly. Get-Member was used to confirm exact property names on returned objects.*
+*Select-Object Name, DistiguishedName returned a column of empty {} values rather than an error. PowerShell does not validate property names against the object, and it creates any variable it sees on first use, so a typo in either produces no error and no output. Misspelled cmdlet names fail loudly; misspelled properties and variables fail quietly. Get-Member was used to confirm exact property names on returned objects.*
   ```powershell
   Get-ADOrganizationalUnit -Filter * | Get-Member
   ```
