@@ -1,117 +1,81 @@
 # Active Directory Home Lab
 
-A virtualized Windows Server Active Directory environment I built to practice and demonstrate core system administration and IT support skills — account provisioning, group policy, DNS/DHCP, and onboarding/offboarding workflows.
+A Windows Server domain built from scratch in Hyper-V to practice and document core system administration work: Active Directory, DNS, DHCP, and PowerShell automation.
 
----
-
-## Overview
-
-I built this home lab to keep my hands-on Active Directory and Windows administration skills current and to practice the day-to-day tasks common to IT support and systems administration roles. The lab simulates a small business environment with a domain controller and domain-joined client workstations, and I use it to practice real account, group, and policy management workflows.
-
----
-
-## Skills Demonstrated
-
-- Active Directory Domain Services (AD DS) installation and configuration
-- User account provisioning and lifecycle management
-- Security group and Organizational Unit (OU) design
-- Group Policy Object (GPO) creation and management
-- DNS and DHCP configuration
-- Domain-joining and managing Windows client workstations
-- Onboarding and offboarding workflows
-- PowerShell automation of routine administrative tasks
-
----
-
-## Lab Architecture
-
-<!-- Add your network diagram image here once created (e.g., made in draw.io). Example: -->
-![Lab Network Diagram](images/lab-diagram.png)
-
-*A domain controller (DC01) providing AD DS, DNS, and DHCP, with Windows 10/11 clients joined to the lab.local domain over an internal virtual network.*
+Every configuration step in this lab was performed and documented in PowerShell rather than through GUI wizards, so the build is repeatable and the reasoning behind each step is recorded.
 
 ---
 
 ## Environment
 
-| Component | Details |
-|-----------|---------|
-| Hypervisor | 
-| Domain Controller | Windows Server 2022, static IP 192.168.100.5 |
-| Client(s) | Windows 10 / Windows 11, domain-joined |
-| Domain | lab.local |
-| Services | Active Directory Domain Services, DNS, DHCP |
+| Role | Hostname | Address | Notes |
+|---|---|---|---|
+| Domain controller | DC01 | 192.168.100.10 (static) | AD DS, DNS, DHCP |
+| Windows 11 client | winpro_lab2 | DHCP assigned | Domain member |
+
+- **Hypervisor:** Hyper-V on Windows 11 Pro
+- **Virtual switch:** Internal, isolated from the physical home network
+- **Domain:** lab.local
+- **Subnet:** 192.168.100.0/24
+- **DHCP scope:** 192.168.100.100 – 192.168.100.200
+- **Static range:** 192.168.100.1 – .99 reserved outside the scope
 
 ---
 
-## What I Built
+## What Is Built
 
-- Installed and configured **Windows Server 2022** as a domain controller
-- Created a new AD forest and domain (`lab.local`)
-- Configured **DNS** (installed automatically with AD DS) and verified name resolution
-- Installed and configured a **DHCP** scope for automatic client addressing
-- Built an **Organizational Unit** structure mirroring a company (departments and locations)
-- Created **user accounts** and **security groups**, and assigned group memberships
-- Configured **Group Policy Objects** for password policies, drive mappings, and desktop settings
-- Joined **Windows 10/11 clients** to the domain and verified login with domain accounts
+**Active Directory Domain Services**
+Forest and domain promoted on DC01. Integrated DNS installed automatically with the role. All FSMO roles held by DC01.
 
----
+**DNS**
+Authoritative for lab.local. Forwarders configured to 8.8.8.8 and 1.1.1.1 so clients resolve external names through the domain controller rather than being pointed at public DNS directly.
 
-## Tasks Practiced
+**DHCP**
+Role installed and authorized in Active Directory. Scope configured with option 006 (DNS server) and option 015 (DNS domain name), so clients receive the correct DNS server automatically and can join the domain without per-machine configuration. Configuration exported to XML as a backup.
 
-**Account Management**
-- Creating, disabling, and removing user accounts
-- Password resets and account unlocks
-- Bulk user creation via PowerShell and CSV import
+**Organizational units**
+A parent `LabUsers` OU with child OUs for IT, HR, Finance, and Operations. Users are placed in OUs rather than the default `CN=Users` container, because Group Policy Objects cannot be linked to a container.
 
-**Groups & Structure**
-- Creating and managing security groups and distribution groups
-- Designing and organizing OUs by department and function
-- Moving users and computers between OUs
-
-**Group Policy**
-- Creating and linking GPOs
-- Enforcing password complexity, mapped drives, and login banners
-- Scoping policies to specific OUs
-
-**Onboarding / Offboarding Workflows**
-- New-hire process: create account → assign groups → place in correct OU → configure settings
-- Offboarding process: disable account → remove group memberships → move to Disabled Users OU → document
+**Bulk user provisioning**
+`New-LabUsers.ps1` reads a CSV, generates usernames from first initial plus last name, checks for existing accounts before creating, places each user in the OU matching their department, and forces a password change at first logon. The script is idempotent — re-running it skips existing accounts rather than erroring or creating duplicates.
 
 ---
 
-## Automation
+## Documentation
 
-Routine AD tasks in this lab are automated with PowerShell. See my related repository:
-<!-- link your PowerShell toolkit repo here -->
-[IT Support PowerShell Toolkit](https://github.com/YOUR-USERNAME/it-support-toolkit)
+| Document | Contents |
+|---|---|
+| [DHCP installation and configuration](docs/dhcp-configuration.md) | Command log for the DHCP role, scope, options, forwarders, and backup |
+| [Active Directory users and OUs](docs/active-directory-users-and-ous.md) | Command log for the OU structure and the bulk provisioning script |
 
-Examples include bulk user creation from CSV, automated onboarding, and offboarding scripts.
-
----
-
-## Screenshots
-
-<!-- Add screenshots of YOUR real work. Suggested shots: -->
-<!-- Active Directory Users and Computers showing your OU structure -->
-<!-- A created user account's properties -->
-<!-- A Group Policy Object you configured -->
-<!-- A client successfully joined to the domain -->
-*Add AD forest to server. ![AD in server window](docs/screenshots/AD_server_role_assignment.png)
-
-*DHCP Installation via Powershell in AD. ![Enabling DHCP in lab.local](docs/screenshots/DHCP_Instalation.png)
-
-*Active Directory Users and Computers — OU structure and accounts:*
-![AD Users and Computers](images/aduc.png)
-
-*Group Policy Management — configured GPO:*
-![Group Policy](images/gpo.png)
-
-*Windows client joined to the lab.local domain:*
-![Domain Join](images/domain-join.png)
+Each document records the commands actually used, the reasoning behind them, and a troubleshooting section covering problems encountered during the build and how they were diagnosed.
 
 ---
 
+## Skills Demonstrated
+
+- Active Directory Domain Services installation, forest promotion, and OU design
+- DNS zone hosting and conditional forwarding
+- DHCP scope configuration, AD authorization, and scope options
+- PowerShell scripting: CSV input, loops, conditional logic, error handling, idempotent operations
+- Hyper-V virtual machine and virtual switch configuration
+- Static and dynamic IP addressing, subnetting, and client-side network troubleshooting
+- Documenting infrastructure work in a form another administrator could follow
+
+---
+
+## In Progress
+
+- Security groups and automated group membership during provisioning
+- Group Policy Objects linked to department OUs
+- Automated offboarding script (disable account, remove group memberships, move to a disabled OU)
+- Internet routing for lab clients via NAT switch
+
+---
+
+## Notes on Scope
+
+This is a lab environment and some configurations are deliberately simplified. The provisioning script uses a hardcoded default password rather than a credential store, DHCP dynamic DNS registration runs under the domain controller machine account rather than a dedicated service account, and the DHCP scope omits a default gateway because the internal virtual switch provides no route off the subnet. Each of these is noted in the relevant document alongside what the production approach would be.
 ## About
 
 Built and maintained by James Andrew Kearse — U.S. Marine Corps veteran and IT support professional.
