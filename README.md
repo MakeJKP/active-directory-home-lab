@@ -21,7 +21,7 @@ Every configuration step in this lab was performed and documented in PowerShell 
 - **DHCP scope:** 192.168.100.100 – 192.168.100.200
 - **Static range:** 192.168.100.1 – .99 reserved outside the scope
 
-![Network topology](docs/screenshots/network-topology.png)
+![Network topology](docs/screenshots/network_topology.png)
 
 ---
 
