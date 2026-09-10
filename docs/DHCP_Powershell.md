@@ -113,9 +113,33 @@
   Export-DhcpServer -File "C:\Backup\dhcp-config.xml" -Leases -Force
 ```
 
-### DHCP Event ID 1056 warning
+### DHCP Event ID 1056 — dynamic DNS registration credentials
 
-*The System log recorded a warning that the DHCP service is running on a domain controller with no dedicated credentials configured for dynamic DNS registration. In that state DHCP registers client DNS records using the machine account, which carries more privilege than the task requires. Noted as a real least-privilege finding. The remediation is a dedicated low-privilege service account configured for dynamic DNS updates.*
+*The System log recorded a recurring warning that the DHCP service was running on a domain controller with no dedicated credentials configured for dynamic DNS registration. In that state, DHCP registers client DNS records using the domain controller's machine account, which carries far more privilege than creating a DNS record requires. Anything able to leverage the DHCP service would inherit that privilege.*
+
+*Remediated by creating a dedicated service account with no group memberships beyond Domain Users, placed in a ServiceAccounts OU to keep service identities separate from user accounts.*
+
+```powershell
+  $pw = Read-Host -AsSecureString "Password for svc-dhcpdns"
+
+  New-ADOrganizationalUnit -Name "ServiceAccounts" -Path "DC=lab,DC=local"
+
+  New-ADUser -Name "svc-dhcpdns" -SamAccountName "svc-dhcpdns" -UserPrincipalName "svc-dhcpdns@lab.local" -Description "DHCP dynamic DNS registration - least privilege" -AccountPassword $pw -PasswordNeverExpires $true -Enabled $true -Path "OU=ServiceAccounts,DC=lab,DC=local"
+```
+
+*The documented command for assigning the credentials, `netsh dhcp server set dnscredentials`, did not behave as expected on Windows Server 2022. Every variation of the syntax accepted the password prompt and then returned unrelated output belonging to a different netsh context, indicating the verb was not being parsed. Running it through cmd rather than PowerShell produced the same result, ruling out a quoting issue. The credentials were configured through the DHCP console instead — right-click the IPv4 node, Properties, Advanced tab, Credentials — which wrote the configuration successfully.*
+
+*Verified by reading the credentials back, restarting the service to trigger the condition that produces the warning, and confirming no new Event 1056 was logged.*
+
+```powershell
+  netsh dhcp server show dnscredentials
+
+  Restart-Service DHCPServer
+
+  Get-WinEvent -LogName System -MaxEvents 20 | Where-Object {$_.Id -eq 1056 -and $_.TimeCreated -gt (Get-Date).AddMinutes(-2)}
+```
+
+*`show dnscredentials` returned the account and domain, and the filtered event query returned nothing, confirming the warning no longer fires. Note that Event 1056 is logged when the DHCP service starts rather than on each lease, so a service restart is required to test the fix rather than simply renewing a client lease.*
 
 ### Virtual machine connection dropped on restart
 
