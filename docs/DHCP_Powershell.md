@@ -131,6 +131,7 @@
 
 ![Console fix](screenshots/dhcp-dns-registration-attempt-powershell.png)
 ![Console fix](screenshots/dhcp-console-for-fix.png)
+![Console fix](screenshots/confirm-dhcp-dns-registration-fix.png)
 
 *Verified by reading the credentials back, restarting the service to trigger the condition that produces the warning, and confirming no new Event 1056 was logged.*
 
