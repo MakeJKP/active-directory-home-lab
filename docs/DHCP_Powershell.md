@@ -127,7 +127,7 @@
   New-ADUser -Name "svc-dhcpdns" -SamAccountName "svc-dhcpdns" -UserPrincipalName "svc-dhcpdns@lab.local" -Description "DHCP dynamic DNS registration - least privilege" -AccountPassword $pw -PasswordNeverExpires $true -Enabled $true -Path "OU=ServiceAccounts,DC=lab,DC=local"
 ```
 
-*The documented command for assigning the credentials, `netsh dhcp server set dnscredentials`, did not behave as expected on Windows Server 2022. Every variation of the syntax accepted the password prompt and then returned unrelated output belonging to a different netsh context, indicating the verb was not being parsed. Running it through cmd rather than PowerShell produced the same result, ruling out a quoting issue. The credentials were configured through the DHCP console instead — right-click the IPv4 node, Properties, Advanced tab, Credentials — which wrote the configuration successfully.*
+*The first attempts used an incorrect account name. This was correct. Then identified the documented command for assigning the credentials, `netsh dhcp server set dnscredentials`, did not behave as expected on Windows Server 2022. Every variation of the syntax accepted the password prompt and then returned unrelated output belonging to a different netsh context, indicating the verb was not being parsed. Running it through cmd rather than PowerShell produced the same result, ruling out a quoting issue. The credentials were configured through the DHCP console instead — right-click the IPv4 node, Properties, Advanced tab, Credentials — which wrote the configuration successfully.*
 
 ![Console fix](screenshots/dhcp-dns-registration-attempt-powershell.png)
 ![Console fix](screenshots/dhcp-console-for-fix.png)
