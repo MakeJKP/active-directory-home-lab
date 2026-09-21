@@ -100,7 +100,7 @@ Install-ADDSForest -DomainName "lab.local"
 Supply a Directory Services Restore Mode password when prompted and allow the
 reboot. Log back in as `LAB\Administrator`.
 
-![AD DS role assignment](screenshots/<real-folder>/AD_server_role_assignment.png)
+![AD DS role assignment](screenshots/dc01/ad-server-role-assignment.png)
 
 Verify the forest and the services that support it.
 
