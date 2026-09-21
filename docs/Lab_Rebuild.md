@@ -100,6 +100,8 @@ Install-ADDSForest -DomainName "lab.local"
 Supply a Directory Services Restore Mode password when prompted and allow the
 reboot. Log back in as `LAB\Administrator`.
 
+![AD DS role assignment](screenshots/dc01/AD_server_role_assignment.png)
+
 Verify the forest and the services that support it.
 
 ```powershell
@@ -153,17 +155,32 @@ Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\ServerManager\Roles\12" `
 Restart-Service DHCPServer
 ```
 
-Verify the scope is active and the server is authorized.
+![DHCP installation](screenshots/dhcp/DHCP_Instalation.png)
+
+Create a dedicated least-privilege service account for dynamic DNS registration,
+then set it as the DHCP DNS credentials (via the DHCP console → IPv4 →
+Properties → Advanced → Credentials — the `netsh` verb for this does not behave
+correctly on Server 2022). This remediates Event ID 1056. See
+[DHCP documentation](DHCP_Powershell.md) for detail.
+
+```powershell
+$pw = Read-Host -AsSecureString "Password for svc-dhcpdns"
+New-ADOrganizationalUnit -Name "ServiceAccounts" -Path "DC=lab,DC=local"
+New-ADUser -Name "svc-dhcpdns" -SamAccountName "svc-dhcpdns" `
+    -UserPrincipalName "svc-dhcpdns@lab.local" `
+    -Description "DHCP dynamic DNS registration - least privilege" `
+    -AccountPassword $pw -PasswordNeverExpires $true -Enabled $true `
+    -Path "OU=ServiceAccounts,DC=lab,DC=local"
+```
+
+Verify the scope is active and the server is authorized, then back up the config.
+The target directory must exist first; most cmdlets that write files will not
+create parent directories.
 
 ```powershell
 Get-DhcpServerv4Scope
 Get-DhcpServerInDC
-```
 
-Back up the configuration. The target directory must exist first; most cmdlets
-that write files will not create parent directories.
-
-```powershell
 New-Item -Path "C:\Backup" -ItemType Directory
 Export-DhcpServer -File "C:\Backup\dhcp-config.xml" -Leases -Force
 ```
@@ -204,10 +221,29 @@ Get-ADOrganizationalUnit -Filter * | Select-Object Name, DistinguishedName
 
 ---
 
-## 9. User provisioning
+## 9. Security groups
 
-Department OUs must exist before this runs. Place `New-LabUsers.ps1` and
-`newusers.csv` from the `scripts/` folder into `C:\Scripts`.
+Access is granted by group membership, not per-user rights. Create a department
+security group in each user OU, plus the cross-cutting `IT-RemoteAccess` group
+used to grant RDP. These must exist before user provisioning, because the
+provisioning script adds each user to their `<Department>-Users` group.
+
+```powershell
+New-ADGroup -Name "IT-Users"         -GroupScope Global -GroupCategory Security -Path "OU=IT,OU=LabUsers,DC=lab,DC=local"
+New-ADGroup -Name "HR-Users"         -GroupScope Global -GroupCategory Security -Path "OU=HR,OU=LabUsers,DC=lab,DC=local"
+New-ADGroup -Name "Finance-Users"    -GroupScope Global -GroupCategory Security -Path "OU=Finance,OU=LabUsers,DC=lab,DC=local"
+New-ADGroup -Name "Operations-Users" -GroupScope Global -GroupCategory Security -Path "OU=Operations,OU=LabUsers,DC=lab,DC=local"
+
+New-ADGroup -Name "IT-RemoteAccess"  -GroupScope Global -GroupCategory Security -Path "OU=LabUsers,DC=lab,DC=local"
+Add-ADGroupMember -Identity "IT-RemoteAccess" -Members jsmith, sjohnson
+```
+
+---
+
+## 10. User provisioning
+
+Department OUs and the department groups must exist before this runs. Place
+`New-LabUsers.ps1` and `newusers.csv` from the `scripts/` folder into `C:\Scripts`.
 
 ```powershell
 Set-ExecutionPolicy RemoteSigned
@@ -216,18 +252,21 @@ cd C:\Scripts
 .\New-LabUsers.ps1
 ```
 
-Verify placement, then re-run the script to confirm it is idempotent — every
-account should be skipped rather than duplicated or erroring.
+The script creates each user in the correct OU, forces a password change at first
+logon, and adds each to their department group. Verify placement and membership,
+then re-run to confirm it is idempotent — accounts are skipped and group
+memberships re-verified rather than duplicated.
 
 ```powershell
 Get-ADUser -Filter * | Select-Object Name, DistinguishedName
+.\Test-LabGroupMembership.ps1 | Where-Object MissingFromGroup
 
 .\New-LabUsers.ps1
 ```
 
 ---
 
-## 10. Client configuration and domain join
+## 11. Client configuration and domain join
 
 Run on each client. Clear any static configuration, switch to DHCP, and let the
 scope supply both the address and the DNS server.
@@ -258,12 +297,12 @@ Add-Computer -DomainName "lab.local" -NewName "CLIENT01" -Restart
 
 ---
 
-## 11. Computer object placement
+## 12. Computer object placement
 
 Computer objects land in `CN=Computers` on join and must be moved into an OU
-before computer-side Group Policy can target them. The two clients are placed
-in different department OUs so that policy scoping can be verified across
-separate targets.
+before computer-side Group Policy can target them. The two clients are placed in
+different department OUs so that policy scoping can be verified across separate
+targets.
 
 Run on the domain controller — the ActiveDirectory module installs with the
 AD DS role and does not exist on member workstations.
@@ -280,13 +319,53 @@ Controllers Policy is linked. Do not move it.
 
 ---
 
-## 12. End-to-end verification
+## 13. Computer object pre-staging
+
+Pre-stage placeholder computer objects per department so Group Policy targeting
+and OU-scoped reporting have realistic targets without a VM per object. Run from
+the `scripts/` folder.
+
+```powershell
+.\New-LabComputers.ps1
+
+# placeholders have no DNSHostName; real machines do
+Get-ADComputer -Filter * -Properties DNSHostName | Select-Object Name, DNSHostName
+```
+
+---
+
+## 14. Group Policy
+
+Two GPOs. Full settings, verification, and troubleshooting are in
+[Group Policy](GroupPolicy.md); the sequence is:
+
+1. **IT - Local Remote Access** — link to `OU=IT,OU=LabComputers`. Local Users and
+   Groups preference adds `LAB\IT-RemoteAccess` to the built-in Remote Desktop
+   Users group; Admin Template enables RDP.
+2. **Workstation Firewall Baseline** — link to `OU=LabComputers`. Firewall on all
+   profiles; Domain/Private inbound Block (default), Public Block all connections;
+   RDP allow rules scoped to the management source (`192.168.100.10`); NLA
+   required, High encryption; idle/disconnected session limits; firewall logging.
+
+Then refresh and verify from a client (OU-targeted policy does not appear in a
+DC's own `gpresult`):
+
+```powershell
+gpupdate /force
+gpresult /r /scope computer
+Get-NetFirewallProfile -PolicyStore ActiveStore | Format-Table Name, Enabled, DefaultInboundAction, AllowInboundRules -AutoSize
+```
+
+---
+
+## 15. End-to-end verification
 
 Log into a domain-joined client with one of the provisioned accounts. A forced
 password change on first logon confirms that the account, its OU placement, and
 the password policy all took effect.
 
-Then confirm the full picture from the domain controller.
+Confirm the full picture from the domain controller, and confirm scoped RDP from
+an in-scope source.
 
 ```powershell
 Get-ADDomain
@@ -296,11 +375,14 @@ Get-DhcpServerv4Lease -ScopeId 192.168.100.0
 Get-ADUser -Filter * | Select-Object Name, DistinguishedName
 Get-ADComputer -Filter * | Select-Object Name, DistinguishedName
 Resolve-DnsName dc01.lab.local
+
+# scoped RDP reachable from the management host (192.168.100.10)
+Test-NetConnection 192.168.100.100 -Port 3389
 ```
 
 ---
 
-## 13. Checkpoints
+## 16. Checkpoints
 
 Take a checkpoint of each VM in a known-good state before making any
 significant change. Run from the host — Hyper-V cmdlets do not exist inside a
@@ -320,14 +402,20 @@ Get-VMSnapshot -VMName "DC01"
 
 Recorded so that a rebuild does not silently inherit them:
 
-- DHCP dynamic DNS registration runs under the domain controller machine
-  account rather than a dedicated low-privilege service account. Logged as
-  Event ID 1056 and documented as a least-privilege finding.
 - The provisioning script contains a hardcoded default password.
 - No route to the internet from the lab subnet; a NAT switch is planned.
 - The DHCP scope omits a default gateway, since the internal switch provides no
   route off the subnet.
 - Administration is performed by logging into the domain controller directly.
-  Production practice is to manage the domain from a workstation using the
-  Remote Server Administration Tools, since interactive logon to a DC exposes
-  privileged credentials on a system that should have minimal exposure.
+  Production practice is to manage the domain from a workstation using the Remote
+  Server Administration Tools, since interactive logon to a DC exposes privileged
+  credentials on a system that should have minimal exposure.
+- RDP host identity relies on a self-signed certificate; an internal CA
+  (AD Certificate Services) is the planned production fix.
+- Domain controller firewall logging was set locally; it is slated to move to a
+  dedicated Domain Controller firewall baseline GPO.
+
+*Resolved since earlier drafts: DHCP dynamic DNS registration now runs under the
+dedicated `svc-dhcpdns` account (Event 1056 remediated), and the RDP/firewall
+one-way reachability failure is fixed and documented in
+[RDP remediation](RDP_Firewall_Remediation.md).*
