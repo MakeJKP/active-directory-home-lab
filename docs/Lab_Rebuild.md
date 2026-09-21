@@ -155,7 +155,7 @@ Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\ServerManager\Roles\12" `
 Restart-Service DHCPServer
 ```
 
-![DHCP installation](screenshots/<real-folder>/DHCP_Instalation.png)
+![DHCP installation](screenshots/dhcp/dhcp-Instalation.png)
 
 Create a dedicated least-privilege service account for dynamic DNS registration,
 then set it as the DHCP DNS credentials (via the DHCP console → IPv4 →
