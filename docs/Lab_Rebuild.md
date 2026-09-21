@@ -100,7 +100,7 @@ Install-ADDSForest -DomainName "lab.local"
 Supply a Directory Services Restore Mode password when prompted and allow the
 reboot. Log back in as `LAB\Administrator`.
 
-![AD DS role assignment](screenshots/dc01/AD_server_role_assignment.png)
+![AD DS role assignment](screenshots/<real-folder>/AD_server_role_assignment.png)
 
 Verify the forest and the services that support it.
 
@@ -155,7 +155,7 @@ Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\ServerManager\Roles\12" `
 Restart-Service DHCPServer
 ```
 
-![DHCP installation](screenshots/dhcp/DHCP_Instalation.png)
+![DHCP installation](screenshots/<real-folder>/DHCP_Instalation.png)
 
 Create a dedicated least-privilege service account for dynamic DNS registration,
 then set it as the DHCP DNS credentials (via the DHCP console → IPv4 →
