@@ -72,4 +72,4 @@ The provisioning script sets a known default password for lab purposes. This is
 appropriate for a disposable test environment and is not how credentials should be
 handled in production, where the password would come from a credential store or be
 generated per account. See the Production Considerations section of the
-[Active Directory documentation](docs/DC01_Powershell.md) for details.
+[Active Directory documentation](../docs/DC01_Powershell.md) for details.
