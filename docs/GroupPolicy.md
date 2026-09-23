@@ -218,8 +218,8 @@ Screenshots:
 
 ![CLIENT01 gpresult — IT - Logon Banner applied, HR absent](screenshots/gpo/client01-gpresult-it-banner.png)
 ![CLIENT02 gpresult — HR - Logon Banner applied, IT absent](screenshots/gpo/client02-gpresult-hr-banner.png)
-
-Still to capture: `it-banner-lockscreen.png` and `hr-banner-lockscreen.png` — each banner as it appears at the client's lock screen.
+![IT logon banner at sign-in on CLIENT01](screenshots/gpo/it-banner-lockscreen.png)
+![HR logon banner at sign-in on CLIENT02](screenshots/gpo/hr-banner-lockscreen.png)
 
 ---
 
