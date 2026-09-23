@@ -1,3 +1,5 @@
+## Group Policy
+
 Group Policy is where this lab moves from "a domain exists" to "the domain is
 managed." Two Group Policy Objects are in place: one grants remote-access rights
 by group membership, and one applies a Windows Defender Firewall baseline to
@@ -124,6 +126,103 @@ Additional captures in `screenshots/gpo/`: `firewall-profile-domain.png`, `firew
 
 ---
 
+## GPO 3 — Domain Password Policy
+
+*Linked at the domain root (`lab.local`), not an OU. Account policies (password,
+lockout, Kerberos) are domain-wide — a password policy linked to an OU does not
+apply to domain user accounts. For per-group or per-OU password rules the tool is
+a Fine-Grained Password Policy (PSO), not a GPO. This was created as a dedicated
+`Domain Password Policy` GPO and moved to Link Order 1 so it outranks the Default
+Domain Policy for these settings.*
+
+**Password Policy** (Computer Configuration → Policies → Windows Settings →
+Security Settings → Account Policies → Password Policy):
+
+- Minimum password length — **14**
+- Password must meet complexity requirements — **Enabled**
+- Enforce password history — **24**
+- Maximum password age — **0 (never expires)** — see design notes
+- Minimum password age — **0**
+- Store passwords using reversible encryption — **Disabled**
+
+**Account Lockout Policy:**
+
+- Account lockout threshold — **5** invalid attempts
+- Account lockout duration — **15** minutes
+- Reset account lockout counter after — **15** minutes
+
+**Design decisions (NIST SP 800-63B):**
+
+- **No forced expiration (max age 0).** 800-63B states verifiers SHALL NOT require
+  periodic rotation — mandatory rotation drives predictable incremental passwords
+  (`Summer2024!` → `Summer2025!`) and habituates users to change-on-demand.
+  Rotation is triggered only on evidence of compromise. The provisioning script's
+  `ChangePasswordAtLogon` on a new account is initial-credential handoff, not
+  periodic rotation, so the two are consistent.
+- **No maximum password length.** AD has no max-length setting by design; capping
+  length is an anti-pattern (800-63B requires permitting ≥64 characters) and blocks
+  passphrases. The minimum is the lever; length is encouraged.
+- **Complexity kept as a compensating control.** Full 800-63B alignment also drops
+  composition rules in favor of breached-password screening, which native AD cannot
+  do — that is Entra Password Protection (banned/leaked-credential lists), the
+  production upgrade. Complexity stays enabled on-prem in the meantime.
+- **Lockout retained, timed not admin-unlock.** NIST prefers graduated
+  rate-limiting/backoff, which on-prem AD cannot do; a timed 15-minute lockout is
+  the on-prem approximation (Entra Smart Lockout is the intelligent version).
+  Admin-required unlock (duration 0) was rejected because it turns the lockout
+  policy into a self-inflicted denial-of-service and a help-desk burden.
+
+*Verified on DC01 and from a client:*
+```powershell
+  Get-ADDefaultDomainPasswordPolicy      # on DC01 — reflects the effective domain policy
+  net accounts                            # on a client after gpupdate /force
+```
+
+![Effective domain password policy](screenshots/gpo/password-policy.png)
+![Domain Password Policy at Link Order 1, above Default Domain Policy](screenshots/gpo/gpo3-link-order.png)
+![Maximum password age set to never expire — NIST 800-63B](screenshots/gpo/gpo3-max-age-never.png)
+
+---
+
+## GPO 4 — Department Logon Banners (OU-scoping demonstration)
+
+*Two GPOs demonstrate OU scoping: a computer receives policy only from GPOs linked
+along its own OU path. Each also sets a legal logon banner — a real control
+mapping to NIST 800-53 AC-8 (System Use Notification) and required by CIS and DoD
+STIG baselines — so the demo doubles as a legitimate hardening artifact.*
+
+- **IT - Logon Banner** → linked to `OU=IT,OU=LabComputers`
+- **HR - Logon Banner** → linked to `OU=HR,OU=LabComputers`
+
+*Each sets a different title and text under Computer Configuration → Policies →
+Windows Settings → Security Settings → Local Policies → Security Options:*
+
+- Interactive logon: Message title for users attempting to log on
+- Interactive logon: Message text for users attempting to log on
+
+*Verified — the positive/negative pair across the two clients is the proof of
+scoping:*
+```powershell
+  # CLIENT01 (OU=IT)
+  gpresult /r /scope computer     # Applied: IT - Logon Banner; HR - Logon Banner absent
+
+  # CLIENT02 (OU=HR)
+  gpresult /r /scope computer     # Applied: HR - Logon Banner; IT - Logon Banner absent
+```
+
+*CLIENT01 receives only the IT banner and CLIENT02 only the HR banner, confirming
+a computer inherits policy solely from its own OU chain. Both banners are also
+visible at the lock screen.*
+
+Screenshots:
+
+![CLIENT01 gpresult — IT - Logon Banner applied, HR absent](screenshots/gpo/client01-gpresult-it-banner.png)
+![CLIENT02 gpresult — HR - Logon Banner applied, IT absent](screenshots/gpo/client02-gpresult-hr-banner.png)
+
+Still to capture: `it-banner-lockscreen.png` and `hr-banner-lockscreen.png` — each banner as it appears at the client's lock screen.
+
+---
+
 ## Troubleshooting Notes
 
 ### GPP "Rename to" field silently renamed the target group
@@ -171,6 +270,31 @@ allow rules; "Block all connections" (shields-up) ignores allow rules entirely.
 Setting the latter by mistake produces a firewall that drops traffic every allow
 rule says to permit — see the remediation write-up.*
 
+### Deleting a GPO's link is not deleting the GPO
+
+*Recreating `IT - Logon Banner` failed with "already exists" after it had
+apparently been deleted. Right-clicking a GPO under an OU and choosing Delete
+removes only the **link** — the GPO object still lives in the Group Policy Objects
+container, and a real delete happens only there (or via `Remove-GPO`). Same shape
+as the earlier link-vs-object confusion.*
+
+### Link scope is where the GPO applies
+
+*The HR banner initially appeared on CLIENT01 (an IT-OU machine) because it had
+been linked at the domain root, which applies to every computer in the domain.
+`gpresult` on CLIENT01 caught it — both banners listed. Moving the link down to
+`OU=HR,OU=LabComputers` scoped it correctly. Domain-root link = everyone; OU link
+= that OU's objects only. This is the same scoping concept the GPO 4 demo teaches,
+experienced as its failure mode first.*
+
+### A gpresult that looks unchanged may be stale
+
+*After moving the link, CLIENT01's `gpresult` still listed the HR banner — but the
+"Last time Group Policy was applied" timestamp was unchanged, meaning it was
+replaying the previous refresh. `gpresult` reflects the last apply; run
+`gpupdate /force` first and confirm the timestamp advanced before trusting the
+output.*
+
 ---
 
 ## Production Considerations
@@ -195,14 +319,17 @@ requirement under most frameworks (e.g. PCI DSS) and modern best practice; it is
 not achievable with on-premises AD alone and is a candidate for the Entra ID
 phase.*
 
+*Privileged accounts warrant a stricter password policy than the domain default —
+the mechanism is a Fine-Grained Password Policy (PSO) scoped to an admin group,
+since the domain password policy is single and domain-wide.*
+
 ---
 
-## Planned
+## Status
 
-- **GPO 3 — Password policy**, linked at the domain root (account policies are
-  domain-wide; fine-grained password policies / PSOs are the OU-scoped
-  alternative).
-- **GPO 4 — Department-differentiated setting** between IT and HR, to demonstrate
-  and verify OU-scoped policy producing different `gpresult` output on CLIENT01
-  vs CLIENT02.
+All four planned GPOs are implemented and verified:
 
+- **GPO 1** — IT - Local Remote Access
+- **GPO 2** — Workstation Firewall Baseline
+- **GPO 3** — Domain Password Policy
+- **GPO 4** — Department Logon Banners (OU-scoping demonstration)
