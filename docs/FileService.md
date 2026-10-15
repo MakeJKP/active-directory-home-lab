@@ -77,7 +77,7 @@ The naming convention `SH-<Dept>-<Right>` (`SH` = share, plus the access level)
 makes the group's purpose readable at a glance and leaves room for a future
 `SH-<Dept>-Read` tier without ambiguity.
 
-![Domain-local SH-* groups created](screenshots/fileservices/ad-groups-domainlocal.png)
+![Domain-local SH-* groups created](screenshots/fileservice/ad-groups-domainlocal.png)
 
 ### 3. Shares and permissions (on MS01)
 
@@ -123,7 +123,7 @@ Each share resolves to its folder under `C:\Shares`, and each share ACL shows
 exactly two entries — `LAB\SH-<Dept>-Modify` = Change and `LAB\Domain Admins` =
 Full — with no `Everyone`.
 
-![Share list and per-share ACL](screenshots/fileservices/smbshare-list.png)
+![Share list and per-share ACL](screenshots/fileservice/smbshare-list.png)
 
 ### Live allow / deny test (on CLIENT01, logged in as `jsmith`, IT)
 
@@ -149,7 +149,7 @@ Confirmed results:
 - `\\MS01\HR` — **Access is denied.** `jsmith` is in no group that grants HR, and
   `Everyone` was removed, so there is no path to access.
 
-![Allow on IT, deny on HR, from jsmith](screenshots/fileservices/access-test-allow-deny.png)
+![Allow on IT, deny on HR, from jsmith](screenshots/fileservice/access-test-allow-deny.png)
 
 ---
 
