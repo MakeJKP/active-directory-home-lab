@@ -67,10 +67,129 @@
 ```powershell
   Get-ChildItem C:\Backup
 ```
-
 ---
 
-## Troubleshooting Notes
+## DHCP Failover
+
+A single DHCP server is a single point of failure — if it goes down, leases stop
+renewing and new clients get no address. DHCP failover makes a second server
+(`MS01`) a live partner to the primary (`DC01`) for the same scope, so address
+assignment survives the loss of either one. This is an **availability** control
+(NIST CSF PR.PT/RC, SOC 2 A1), and it's the standard way DHCP is deployed in any
+environment that can't tolerate an addressing outage.
+
+### Topology
+
+| Role | Server | Address |
+|---|---|---|
+| Primary | DC01 | 192.168.100.10 |
+| Partner | MS01 | 192.168.100.11 |
+
+Both servers share one failover relationship covering the `192.168.100.0`
+scope, running in **Load Balance** mode split 50/50.
+
+### 1. DHCP role on the partner (on MS01)
+
+```powershell
+Install-WindowsFeature DHCP -IncludeManagementTools
+Add-DhcpServerSecurityGroup
+Restart-Service DHCPServer
+```
+
+The partner needs the DHCP role installed, but **not** a manually created scope —
+the scope is replicated from the primary when the failover relationship is built.
+Creating it by hand on both servers would be the wrong approach and would conflict.
+
+### 2. Authorize the partner in Active Directory (on MS01, as a domain admin)
+
+```powershell
+Add-DhcpServerInDC -DnsName MS01.lab.local -IPAddress 192.168.100.11
+```
+
+A DHCP server will not hand out addresses until it is **authorized in AD** — this
+is the directory check that stops rogue DHCP servers. See the troubleshooting note
+below: this step must run in a domain security context, not as the local machine
+administrator.
+
+### 3. Create the failover relationship (on DC01)
+
+```powershell
+Add-DhcpServerv4Failover -Name "DC01-MS01-Failover" -PartnerServer MS01.lab.local -ScopeId 192.168.100.0 -LoadBalancePercent 50 -SharedSecret "<shared-secret>" -Force
+```
+
+This one command, run only on the primary, replicates the scope to the partner
+and establishes the relationship. The key parameters:
+
+- **`-PartnerServer`** — the second server that will share the scope.
+- **`-ScopeId`** — the scope being made highly available (the scope *network
+  address*, `192.168.100.0`, not an individual host).
+- **`-LoadBalancePercent 50`** — the primary serves 50% of requests, the partner
+  the other 50%.
+- **`-SharedSecret`** — authenticates replication traffic between the two servers
+  so failover messages can't be spoofed.
+
+### Load Balance vs. Hot Standby
+
+Failover runs in one of two modes — worth knowing both by name:
+
+| Mode | Behaviour | Fits |
+|---|---|---|
+| **Load Balance** (used here) | Both servers active, splitting requests by percentage (default 50/50) | A single site with two peer servers |
+| **Hot Standby** | One server active; the other holds a reserve of addresses and takes over only on failure | A central/branch model where the standby sits at another site |
+
+Both modes rely on the **Maximum Client Lead Time (MCLT)** — a safety window
+(default ~1 hour) a partner must wait before assuming full control of a failed
+server's address pool, preventing duplicate assignment during a brief outage.
+
+### Verification (on both DC01 and MS01)
+
+```powershell
+Get-DhcpServerv4Failover
+```
+
+Run on each server, the relationship reports **`State : Normal`**, **`Mode :
+LoadBalance`**, and both servers listed as partners — confirming replication is
+healthy from both sides, not just the primary.
+
+![DHCP failover relationship, State Normal, from both servers](screenshots/dhcp/dhcp-failover-verify.png)
+
+### Troubleshooting notes
+
+- **Authorizing DHCP in AD requires a domain security context.**
+  `Add-DhcpServerInDC` failed with **DHCP error 20070 — "Failed to initialize
+  directory service resources"** when logged in as the local `MS01\Administrator`.
+  Authorizing a DHCP server writes to the configuration partition of AD and needs
+  **Enterprise Admin** rights in a domain context. The fix was to log in as
+  `LAB\Administrator` and re-run it. A local account, however privileged on the
+  box, has no standing in the directory.
+
+- **Backtick line-continuation dropped the leading hyphens on parameters.**
+  The first `Add-DhcpServerv4Failover` attempt, written across multiple lines with
+  backticks, silently lost the `-` on `-PartnerServer`/`-ScopeId`/others, so the
+  values bound *positionally* and the command failed. Running it as a **single
+  line** fixed it. This is the recurring lesson of the whole build — backtick
+  continuations are fragile; prefer a single line or splatting.
+
+### Compliance mapping
+
+| Control | Implementation | Framework |
+|---|---|---|
+| Availability of a core network service | Two-server failover for DHCP | NIST CSF PR.PT/RC.RP · SOC 2 A1.1–A1.2 |
+| Rogue-service prevention | AD authorization required before a server leases | NIST 800-53 CM-7 · CIS Control 4 |
+| Authenticated infrastructure replication | Shared secret on the failover relationship | NIST 800-53 SC-8 · SOC 2 CC6.6 |
+
+### Production considerations
+
+- The **shared secret** would come from a secrets store, not be typed inline, and
+  would differ per relationship.
+- Larger environments often prefer **Hot Standby** across two sites so a full-site
+  failure is covered, and tune **MCLT** and the standby reserve percentage to the
+  recovery objective.
+- Failover covers the *addressing service*; **scope options** (DNS servers, domain
+  name) replicate with the scope, but any server-level option set outside the
+  scope must be configured on both servers.
+
+---
 
 ### Client adapter accumulated multiple IPv4 addresses
 
