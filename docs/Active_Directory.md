@@ -1,3 +1,24 @@
+## Forest Promotion and Directory Foundation
+
+*Promoted DC01 to the first domain controller of a new forest. AD DS installs and configures DNS automatically as part of the promotion; DC01 becomes authoritative for `lab.local` and holds all five FSMO roles (it is the only DC in the lab).*
+```powershell
+  Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
+  Install-ADDSForest -DomainName "lab.local"
+```
+*Supplied a Directory Services Restore Mode (DSRM) password at the prompt and allowed the reboot. The `lab.local` namespace and the single-forest / single-domain design — including why `.local` is a lab-only choice — are covered in [Architecture & Design Decisions](Architecture.md).*
+
+![AD DS role assignment](screenshots/dc01/ad-server-role-assignment.png)
+
+*Verified the forest, the supporting services, and FSMO role placement.*
+```powershell
+  Get-ADForest | Select-Object ForestMode, SchemaMaster, DomainNamingMaster
+  Get-ADDomain | Select-Object DomainMode, PDCEmulator, RIDMaster, InfrastructureMaster
+  Get-Service NTDS, DNS
+```
+*FSMO at a glance: the **Schema** and **Domain Naming** masters are forest-wide (one of each per forest); the **PDC Emulator**, **RID Master**, and **Infrastructure Master** are domain-wide. All five sit on DC01 here. Production keeps them consolidated but runs them on **redundant DCs**, so losing one is recovered by transferring (graceful) or seizing (failure) the roles — not by rebuilding the forest.*
+
+---
+
 ## Active Directory User Provisioning and OU Structure
 
 *Confirmed the starting state of the directory. Only the three built-in accounts existed at this point.*
