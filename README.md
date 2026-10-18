@@ -12,15 +12,17 @@ Every configuration step in this lab was performed and documented in PowerShell 
 |---|---|---|---|
 | Domain controller | DC01 | 192.168.100.10 (static) | Domain Controllers |
 | Member server | MS01 | 192.168.100.11 (static) | Servers |
+| Enterprise Root CA | CA01 | 192.168.100.12 (static) | Servers |
 | Windows 11 client | CLIENT01 | DHCP assigned | LabComputers\IT |
 | Windows 11 client | CLIENT02 | DHCP assigned | LabComputers\HR |
 
 - **Hypervisor:** Hyper-V on Windows 11 Pro
-- **Virtual switch:** Internal, isolated from the physical home network
+- **Virtual switch:** Internal (`lab.local.switch`), isolated from the physical home network
 - **Domain:** lab.local
 - **Subnet:** 192.168.100.0/24
 - **DHCP scope:** 192.168.100.100 – 192.168.100.200
 - **Static range:** 192.168.100.1 – .99 reserved outside the scope
+- **Internet:** host-based NAT via gateway 192.168.100.1 (the lab reaches the internet without multihoming the DC)
 
 ![Network topology](docs/screenshots/topology/network-topology.png)
 
@@ -32,7 +34,7 @@ Every configuration step in this lab was performed and documented in PowerShell 
 Forest and domain promoted on DC01. Integrated DNS installed automatically with the role. All FSMO roles held by DC01.
 
 **DNS**
-Authoritative for lab.local. Forwarders configured for external resolution, though these are currently inactive by design — see Notes on Scope below.
+Authoritative for lab.local. Forwarders (`8.8.8.8`, `1.1.1.1`) resolve external names now that the lab has an internet route via NAT — clients resolve both internal and external names through DC01 with no per-client configuration.
 
 **DHCP with failover**
 Role installed and authorized in Active Directory. Scope configured with option 006 (DNS server) and option 015 (DNS domain name), so clients receive the correct DNS server automatically and can join the domain without per-machine configuration. Dynamic DNS registration runs under a dedicated least-privilege service account (`svc-dhcpdns`), remediating the Event 1056 finding. A **DHCP failover relationship** (Load Balance, 50/50) between DC01 and MS01 makes addressing highly available — the loss of either server does not stop leases. Configuration exported to XML as a backup.
@@ -82,6 +84,12 @@ Department file shares on MS01 with access granted entirely through group member
 **Automated offboarding and membership audit**
 `Disable-LabUser.ps1` performs a scripted leaver process — disable the account, strip group memberships, move to a `Disabled Users` OU, and append an audit log — with `-WhatIf` support. `Test-LabGroupMembership.ps1` audits whether each user is in their correct department group and reports drift, pairing detection with the provisioning/offboarding remediation.
 
+**Internal PKI (AD Certificate Services)**
+A dedicated Enterprise Root CA on CA01 issues trusted certificates across the domain. A custom `RDPAuthentication` template (Server Authentication) auto-enrolls to every machine, and a GPO points RDP at it — so RDP now presents a **CA-issued certificate trusted automatically via the AD-published root**, eliminating the self-signed-certificate warning. Validated by connecting over RDP with no warning and confirming the presented cert's issuer is `lab-CA01-CA`. Foundation for LDAPS, cert-based auth, and 802.1X.
+
+**Internet access via NAT**
+Host-based NAT gives the lab subnet internet access (Windows Update, external DNS resolution, and the cloud-identity phase) **without multihoming the domain controller** — every VM stays single-homed, and the Hyper-V host NATs the lab's traffic out through its own uplink. This reactivates the DC's DNS forwarders, which had no route until now.
+
 **RDP connectivity remediation (troubleshooting case study)**
 A persistent one-way reachability failure — DC01 could not reach CLIENT01 on ICMP or TCP 3389 despite correct allow rules — was resolved by systematic, layer-by-layer elimination (client firewall → IP → virtual switch → L2/ARP → DC adapter/stack), then a `pktmon` capture that localized the drop to the Windows Filtering Platform, and finally a `wfpdiag` state dump that **named the exact filter and its provider**: a "Shielded Main Rule" installed by the built-in firewall in shields-up mode, overriding the allow rules. Fixed at the GPO (not the client), then verified with a positive test (in-scope source succeeds) and a negative test (out-of-scope source correctly refused). Full write-up: [RDP connectivity remediation & firewall hardening](docs/RDP_Firewall_Remediation.md).
 
@@ -97,6 +105,7 @@ Firewall and access-control decisions in this lab are deliberately mapped to rec
 - **NLA + High encryption for remote sessions** — CIS 3/6 · SOC 2 CC6.7
 - **Timely, auditable deprovisioning on separation** — SOC 2 CC6.1–6.3 · NIST 800-53 AC-2 · CIS 6
 - **Service availability (DHCP failover)** — NIST CSF PR.PT/RC · SOC 2 A1
+- **Trusted host identity / PKI (internal CA, CA-issued RDP certs)** — NIST 800-53 SC-12/SC-17 · NIST CSF PR.AC · SOC 2 CC6.7
 - **Firewall logging (detection/audit trail)** — CIS 8 · NIST CSF DE.CM · SOC 2 CC7.2
 - **GPO-enforced baseline (single source of truth)** — CIS 4 · SOC 2 CC8.1
 
@@ -113,6 +122,8 @@ A full control → implementation → verification crosswalk (including secondar
 | [File services (AGDLP shares)](docs/FileService.md) | Group-driven department shares on the member server, the AGDLP model, share + NTFS permissions, and live access testing |
 | [Group Policy](docs/GroupPolicy.md) | Remote-access, firewall-baseline, password-policy, and department-banner GPOs, with scoping and verification |
 | [DC firewall baseline](docs/DC_Firewall_Baseline.md) | Default-deny inbound firewall for the domain controller, role-aware allow-list (AD DS/DNS/DHCP), the NLA profile troubleshooting case, and verification |
+| [Internal PKI (AD CS)](docs/AD_CS_PKI.md) | Enterprise Root CA, the RDP certificate template, auto-enrollment, the self-signed-warning fix, and the full troubleshooting chain |
+| [Internet access via NAT](docs/NAT_Internet.md) | Host-based NAT giving the lab internet without multihoming the DC, DC default route, DNS forwarders, and troubleshooting |
 | [User offboarding](docs/Offboarding.md) | Scripted leaver process — disable, strip groups, move to Disabled Users OU, and log — with compliance mapping |
 | [RDP remediation & firewall hardening](docs/RDP_Firewall_Remediation.md) | Diagnostic methodology, root cause, GPO remediation, verification, and compliance crosswalk |
 | [Troubleshooting notes](docs/Troubleshooting_Notes.md) | Consolidated, cross-cutting lessons from the whole build |
@@ -135,6 +146,8 @@ Each document records the commands actually used, the reasoning behind them, and
 - Windows Defender Firewall management via Group Policy — default-deny inbound, rule scoping, profile differentiation, and logging — on both workstations and a domain controller
 - Host-based firewall baselining authored in PowerShell against the GPO policy store
 - Network-profile (NLA) troubleshooting — diagnosing profile-scoped rules on a misclassified NIC
+- Internal PKI with AD Certificate Services — Enterprise Root CA, certificate templates, auto-enrollment, and RDP certificate binding
+- Hyper-V NAT networking — providing internet to an isolated lab without multihoming the DC, host-to-guest gateway and routing troubleshooting
 - Remote access hardening — RDP with NLA, connection encryption, session limits, and source scoping
 - Network troubleshooting to packet level — layered elimination, `pktmon` capture analysis, and WFP (`wfpdiag`) filter identification
 - Identity lifecycle automation — bulk provisioning, offboarding, and membership-drift auditing
@@ -146,10 +159,14 @@ Each document records the commands actually used, the reasoning behind them, and
 
 ---
 
-## In Progress
+## Planned Extensions
 
-- Internal PKI via AD Certificate Services (trusted RDP host certificates; removes the self-signed certificate warning)
-- Internet routing for lab clients via NAT switch
+The on-premises core is complete. With internet access now in place, the next phase extends the lab outward:
+
+- **Linux domain integration** — joining the existing Ubuntu and RHEL VMs to the domain (`realm`/SSSD) with AD-group-driven `sudo`
+- **Hybrid identity** — Microsoft 365 with Entra Connect (directory sync) and Intune (device management)
+- **Google Workspace** — AD → Workspace directory sync (GCDS) and a ChromeOS Flex endpoint
+- **Internal PKI depth** — LDAPS using the issued DC certificates, and a two-tier CA (offline root + issuing subordinate)
 
 ---
 
@@ -157,9 +174,9 @@ Each document records the commands actually used, the reasoning behind them, and
 
 This is a lab environment and some configurations are deliberately simplified.
 
-The domain controller was initially given a second network adapter to provide internet access. This was removed after recognizing that a multihomed domain controller registers multiple addresses in DNS, which can cause clients to attempt connections on an unreachable address. The lab now runs on a single isolated adapter, and external routing is planned through a NAT switch instead. As a result, the configured DNS forwarders currently have no route to their upstream resolvers — internal resolution for lab.local is unaffected.
+The domain controller was initially given a second network adapter to provide internet access. This was removed after recognizing that a multihomed domain controller registers multiple addresses in DNS, which can cause clients to attempt connections on an unreachable address. The lab now runs on a single isolated adapter and reaches the internet through **host-based NAT** (gateway 192.168.100.1) instead, so the DC stays single-homed. The DNS forwarders now resolve external names through that route — see the [NAT write-up](docs/NAT_Internet.md).
 
-The provisioning script uses a hardcoded default password rather than a credential store. The DHCP scope omits a default gateway because the internal virtual switch provides no route off the subnet. RDP host identity currently relies on a self-signed certificate (expected without an internal CA); an AD Certificate Services deployment is the planned production fix. The domain controller's firewall logging, originally set locally as an interim measure, is now governed by the dedicated DC Firewall Baseline GPO. Because the lab network is isolated (no routable gateway), the DC's NIC classifies as a Public/Unidentified network, so the DC firewall rules are scoped to all profiles rather than Domain-only — on a routed production network they would be Domain-scoped. Each of these is noted in the relevant document alongside what the production approach would be.
+The provisioning script uses a hardcoded default password rather than a credential store. RDP host identity is now secured by a CA-issued certificate from the internal Enterprise Root CA (the former self-signed certificate is replaced) — see the [AD CS write-up](docs/AD_CS_PKI.md). The domain controller's firewall logging, originally set locally as an interim measure, is now governed by the dedicated DC Firewall Baseline GPO. Because the lab network is isolated (no routable gateway), the DC's NIC classifies as a Public/Unidentified network, so the DC firewall rules are scoped to all profiles rather than Domain-only — on a routed production network they would be Domain-scoped. The single online Root CA is a lab simplification; production uses a two-tier hierarchy with an offline root. Each of these is noted in the relevant document alongside what the production approach would be.
 
 ---
 
