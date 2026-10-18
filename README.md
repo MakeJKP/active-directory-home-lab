@@ -128,6 +128,7 @@ A full control → implementation → verification crosswalk (including secondar
 | [RDP remediation & firewall hardening](docs/RDP_Firewall_Remediation.md) | Diagnostic methodology, root cause, GPO remediation, verification, and compliance crosswalk |
 | [Troubleshooting notes](docs/Troubleshooting_Notes.md) | Consolidated, cross-cutting lessons from the whole build |
 | [Lab rebuild runbook](docs/Lab_Rebuild.md) | Ordered, condensed steps to rebuild the entire lab from nothing |
+| [PowerShell command reference](docs/PowerShell_Reference.md) | Every command used in the lab, broken down by area — what it is, what it does, and a real example — for quick reuse |
 
 Each document records the commands actually used, the reasoning behind them, and a troubleshooting section covering problems encountered during the build and how they were diagnosed.
 
