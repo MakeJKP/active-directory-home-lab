@@ -270,6 +270,17 @@ healthy from both sides, not just the primary.
 
 ---
 
+## Scope Design Notes
+
+*The choices behind the scope, and the alternatives a design review would ask about.*
+
+- **Lease duration.** The default 8-day lease suits a stable network of mostly-persistent clients. Shorter leases (hours) fit high-churn networks such as guest Wi-Fi, so addresses return to the pool quickly; longer leases reduce DHCP chatter but reclaim addresses slowly. Lease length is a trade-off between pool availability and renewal traffic.
+- **Reservations vs. exclusions.** A **reservation** hands a specific device the same address from inside the pool, keyed by MAC — the right tool for printers and appliances that need a stable IP but should still be DHCP-managed (options and visibility included). An **exclusion** removes addresses from the pool entirely, for devices configured statically. This lab uses the simplest form of exclusion: all static servers (`.10`–`.12`) and the gateway (`.1`) live in the `.1`–`.99` range, which is kept **outside** the scope altogether, so a static address can never collide with a lease.
+- **Failover mode.** The lab uses **Load Balance (50/50)** — both servers active and sharing requests — which suits a single site. **Hot Standby** (one active, one holding a reserve) fits a central/branch model where the standby sits at another site. The legacy **80/20 split scope** across two independent servers predates the failover feature and is no longer the recommended approach, because the two servers don't share lease state.
+- **Scope options over per-client config.** Options 003 (router), 006 (DNS), and 015 (DNS domain) are set once on the scope so every client self-configures for the domain — the reason a new machine can join `lab.local` with zero manual network setup.
+
+---
+
 ## Production Considerations
 
 *DHCP dynamic DNS registration should run under a dedicated service account rather than the domain controller machine account. The scope now hands a default gateway (option 003 → 192.168.100.1) so clients route to the internet through host-based NAT. DHCP failover between DC01 and MS01 is configured so address assignment survives the loss of a single host — see the DHCP Failover section above.*
