@@ -117,8 +117,9 @@ A full control → implementation → verification crosswalk (including secondar
 
 | Document | Contents |
 |---|---|
-| [Domain controller and Active Directory](docs/DC01_Powershell.md) | OU structure, security groups, bulk provisioning, computer pre-staging, and domain joins |
-| [DHCP installation and configuration](docs/DHCP_Powershell.md) | DHCP role, scope, options, forwarders, service-account remediation, backup, and failover |
+| [Architecture & design decisions](docs/Architecture.md) | System-level design, every major decision with rationale and production alternative, the layered security model, and a consolidated compliance crosswalk — start here |
+| [Domain controller and Active Directory](docs/Active_Directory.md) | Forest promotion, FSMO, OU structure, security groups, bulk provisioning, computer pre-staging, and domain joins |
+| [DHCP installation and configuration](docs/DHCP.md) | DHCP role, scope, options, forwarders, service-account remediation, backup, and failover |
 | [File services (AGDLP shares)](docs/FileService.md) | Group-driven department shares on the member server, the AGDLP model, share + NTFS permissions, and live access testing |
 | [Group Policy](docs/GroupPolicy.md) | Remote-access, firewall-baseline, password-policy, and department-banner GPOs, with scoping and verification |
 | [DC firewall baseline](docs/DC_Firewall_Baseline.md) | Default-deny inbound firewall for the domain controller, role-aware allow-list (AD DS/DNS/DHCP), the NLA profile troubleshooting case, and verification |
