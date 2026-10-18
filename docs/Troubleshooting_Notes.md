@@ -1,150 +1,229 @@
-# Troubleshooting Notes
+# RDP Connectivity Remediation & Workstation Firewall Hardening
 
-A consolidated index of the recurring lessons from building this lab — the
-mistakes that cost real time and the habits adopted to avoid repeating them.
-Per-incident detail lives in the topic docs ([DC01/AD](DC01_Powershell.md),
-[DHCP](DHCP_Powershell.md), [Group Policy](GroupPolicy.md),
-[RDP remediation](RDP_Firewall_Remediation.md)); this file is the cross-cutting
-summary.
+> Resolution of a persistent one-way RDP/ICMP reachability failure between DC01 and
+> CLIENT01, and the hardening + compliance baseline built on top of the fix.
+> Spans lab Sessions 3–5.
 
-The single most useful meta-lesson: **when something fails silently, stop
-inferring and get a definitive signal** — `Get-Member`, a packet capture, a
-provider name, the actual resultant policy. Most of the time lost below was spent
-guessing where a direct check would have answered it.
+## Overview
 
----
+The goal was straightforward: allow `LAB\jsmith` (a member of `IT-RemoteAccess`) to
+RDP into **CLIENT01** (`192.168.100.100`). The symptom was not: **DC01 → CLIENT01
+failed on both ICMP and TCP 3389, while CLIENT01 → DC01 succeeded** — persistent,
+one-way unreachability that survived reboots, NIC rebuilds, stack resets, and a full
+host cold boot.
 
-## Know which machine you're on
+Every host-based firewall *allow* rule was verified correct (Remote Desktop TCP-In/UDP-In
+and ICMP echo, all `Enabled`, `Allow`, `Domain` profile), yet inbound traffic still died.
+The contradiction — correct allow rules, traffic still dropped — was the whole puzzle, and
+the answer turned out to be the plainest thing on the board once the evidence was read
+directly instead of inferred.
 
-- **`hostname` first, every time.** VM consoles are visually identical, and
-  commands staged on the wrong guest were the single most frequent error across
-  every session — nearly assigning a client the DC's `.10` address, running
-  host-only `Get-VM*` cmdlets inside a guest, running WFP filter queries on the DC
-  when only the client mattered. Mitigation: retitle or color-code each console so
-  the distinction is mechanical, not remembered.
-- **Host-level and guest-level cmdlets are not interchangeable.** Hyper-V cmdlets
-  (`Checkpoint-VM`, `Get-VMNetworkAdapter`) exist only on the physical host; the
-  `ActiveDirectory` module exists only where AD DS or RSAT is installed. A guest
-  has no awareness that it is virtualized.
-- **`Get-ADComputer`/GPO edits belong on the DC; firewall/RDP checks belong on the
-  client.** OU-targeted policy never appears in the DC's own `gpresult` — the DC
-  isn't in the target OU. Verify OU-scoped policy on a machine that sits in the OU.
+## Environment
 
-## Loud failures vs. silent failures
+See the main lab topology doc for full detail. Relevant machines:
 
-- **Misspelled cmdlets fail loudly; misspelled properties and variables fail
-  silently.** `Get-ADCompter` throws; `Select-Object DistiguishedName` just prints
-  an empty column, and PowerShell auto-creates any variable on first use. A blank
-  column is a typo, not "no data." Confirm property names with `Get-Member` before
-  concluding anything is missing.
-- **Confirm the command actually ran.** Several dead ends were commands typed but
-  never executed (un-pressed Enter), or a native tool that printed help instead of
-  running. Verify output exists before drawing a conclusion.
+| Role | VM | IP | Notes |
+|---|---|---|---|
+| DC01 | `ServerD01` | `192.168.100.10` (static) | AD DS / DNS / DHCP, all FSMO. Domain Controllers OU. |
+| CLIENT01 | `winpro_lab1` | `192.168.100.100` (DHCP) | `OU=IT,OU=LabComputers`. The remediation target. |
+| CLIENT02 | `winpro_lab2` | `192.168.100.101` (DHCP) | `OU=HR,OU=LabComputers`. Used as the out-of-scope control. |
 
-## Native tools parse their own flags
+Internal-only Hyper-V switch (`lab.local.switch`), subnet `192.168.100.0/24`.
 
-- **Forward slashes for native exes.** `gpupdate \force` (backslash) is an invalid
-  switch — the tool printed its usage and never refreshed policy, which looked
-  exactly like "the GPO won't apply." Use `/force`, and confirm *"Computer Policy
-  update has completed successfully."*
-- **PowerShell's case-insensitivity does not extend to native exes.** `tar -c`
-  (create) vs `-C` (change dir) collide; use `expand file.cab -F:* dest` for cabs.
-- **A documented command isn't guaranteed to work.** `netsh dhcp server set
-  dnscredentials` did not behave correctly on Server 2022 (it returned output from
-  an unrelated netsh context). The DHCP console wrote the same setting
-  successfully. When a CLI verb silently misbehaves, fall back to the GUI rather
-  than assuming a quoting error.
+## Diagnostic methodology
 
-## Files and extensions
+The value of this incident is the method, not just the fix. Reachability was eliminated
+layer by layer — client firewall → IP config → virtual switch → L2/ARP → DC firewall →
+DC adapter/route/stack — with each layer ruled out by direct test. That process is
+documented in full in the session handoffs; two turning points matter here.
 
-- **Turn on "File name extensions" in Explorer.** Rounds of time were lost to
-  `.cvs`/`.csv`/no-extension/`.txt` saves from Notepad. Create `.ps1` files with
-  `notepad C:\path\file.ps1` (extension locked) or a single-quoted here-string.
-- **`Import-Csv` reads CSV, not XLSX.** A `.xlsx` sitting where the script expects a
-  `.csv` parses as garbage rows. Keep the sample input as real `.csv`.
+**1. `pktmon` ended the guessing.** A packet capture on CLIENT01 during a ping from DC01
+showed the echo requests arriving intact and traversing the entire NDIS stack — miniport,
+capture filters, WFP MAC layer, TCPIP binding — then dying at `tcpip.sys` (TCP/IPv4 L3/L4)
+with `DropReason: inspection drop`, **in both directions**. "Inspection drop" means the
+Windows Filtering Platform (WFP) rejected the packet. The network path was healthy end to
+end; CLIENT01's own filtering engine was refusing the traffic at the last step.
 
-## Active Directory
+**2. The WFP state dump (`wfpdiag`) named the filter.** Parsing the capture's 59 drop
+events isolated four filters responsible for every drop involving DC01, and — critically —
+every one carried the provider **`FWPM_PROVIDER_MPSSVC_WF`**: the built-in Windows Defender
+Firewall service. Not a third-party callout driver, not a stale orphaned filter, not an
+IPsec connection-security rule.
 
-- **Objects go in OUs, not `CN=Users`/`CN=Computers`.** A container cannot have a
-  GPO linked to it. The first provisioning run omitted `-Path` and dropped users in
-  `CN=Users`, which would have blocked all later GPO work.
-- **"Parent is uninstantiated or deleted" on a move means the target DN is wrong or
-  missing.** AD cannot distinguish a malformed DN from a nonexistent one. Copy DNs
-  from `Get-AD*` output rather than retyping (`DC=lab=local` vs `DC=lab,DC=local`).
-- **Idempotency has to cover every step, not just creation.** Group membership was
-  added to provisioning after the first five accounts existed; because the script
-  skipped existing accounts wholesale, those five never got grouped. Fix: the
-  existence check short-circuits *only* creation, while membership is verified on
-  every run. `Add-ADGroupMember` is naturally idempotent.
-- **Verify destructive commands before running them.** `Remove-ADUser -Confirm:$false`
-  with a mis-scoped `-SearchBase` deletes silently. Run the `Get-`/`Where-Object`
-  half first, confirm the set, then append the removal.
+| filterId | Name | Layer | Action | What it dropped |
+|---|---|---|---|---|
+| **69316** | **Shielded Main Rule** | `ALE_AUTH_RECV_ACCEPT_V4` | **BLOCK, no conditions** | inbound ICMP echo from DC01 |
+| 69318 | Shielded Main Rule (sibling) | `ALE_AUTH_RECV_ACCEPT` | BLOCK, no conditions | inbound |
+| 70028 | Port Scanning Prevention Filter | `INBOUND_TRANSPORT_V4_DISCARD` | callout → silent drop (stealth) | inbound return traffic |
+| 70030 | Port Scanning Prevention Filter | `OUTBOUND_ICMP_ERROR_V4` | BLOCK (stealth) | outbound ICMP errors to DC01 |
 
-## Group Policy
+## Root cause
 
-- **GPP "Rename to" is an action, not a label.** It silently renamed the built-in
-  Remote Desktop Users group, causing error 1376 on logon. Diagnosed by well-known
-  SID (`S-1-5-32-555`) and fixed with `Rename-LocalGroup`.
-- **GPP preferences don't self-heal in reverse.** Correcting the GPO does not undo
-  damage already applied to a client — remediate the client directly too.
-- **"Block (default)" ≠ "Block all connections."** The former blocks unmatched
-  inbound but honors allow rules; the latter (shields-up) ignores allow rules
-  entirely. Setting the latter by mistake drops traffic every allow rule permits.
+**Filter 69316, "Shielded Main Rule"** — an *unconditional* `FWP_ACTION_BLOCK` at the
+inbound-accept layer, sitting at high weight in the MpsSvc sublayer, **above** the allow
+rules. That is the exact construct Windows installs when a firewall profile has
+**"Block all incoming connections, including those in the list of allowed apps"** enabled —
+i.e. **shields-up / shielded mode**.
 
-## Network diagnosis
+This resolved the central paradox: **shielded mode bypasses allow rules entirely.** An
+unconditional block at the accept layer wins before the RDP or ICMP allow rules are ever
+consulted. The two "Port Scanning Prevention" (stealth) filters explain the *shape* of the
+failure — they silently drop and suppress the outbound ICMP unreachable/RST, which is why
+DC01 only ever saw uniform `TimedOut` with nothing coming back.
 
-- **Self-tests are unreliable for reachability.** A machine testing its own port
-  can mislead; test across the network from the other host.
-- **An elimination is only valid if the rest of the path is known-good at the
-  time.** The firewall was "ruled out" against a broken sender, so the result had
-  to be discarded and the theory reopened hours later. Re-run eliminations after
-  fixing anything upstream.
-- **Bisect earlier.** With checkpoints available, "did this ever work?" should come
-  before "what's blocking it?" — but make sure the checkpoint state isn't itself
-  confounded (a pre-GPO checkpoint has the default firewall, which blocks inbound
-  by default — failure there is expected, not evidence of a fault).
-- **Packet capture ends guessing.** Ten layers were eliminated by inference over
-  two sessions; `pktmon` named the failing component in one run, and the `wfpdiag`
-  state dump named the exact filter *and its provider*. Reach for capture far
-  sooner when a path fails silently. `pktmon` is built into Win11/Server 2022.
-- **Read the provider before theorizing.** The RDP drops were blamed on NIC
-  binding, a third-party driver, and stale filters across two sessions; the WFP
-  dump showed provider `MpsSvc` on every one — the plain built-in firewall in
-  shields-up. The evidence named the cause; the theories had not.
-- **Interface byte counters are a fast liveness proof.** Sent/Received in the
-  millions means the NIC and switch port work — stop suspecting hardware.
-- **Removing and re-adding a Hyper-V NIC renames the interface** (`Ethernet` →
-  `Ethernet 2` → `Ethernet 3`) and can leave a hidden ghost NIC. Never assume the
-  alias survived; check `Get-NetAdapter` first.
-- **`New-NetIPAddress` appends rather than replaces.** Re-running it stacked
-  multiple addresses on one adapter, including a duplicate of the DC's `.10`. Clear
-  the interface before assigning.
-- **A multihomed domain controller registers all its addresses in DNS**, so clients
-  may try to reach it on an unroutable one. Keep a DC on a single adapter.
-- **Bad-destination typos have a tell.** A mistyped ping/`Test-NetConnection`
-  target (`193.` for `192.`, `.100` for `.10`) returns blank `InterfaceAlias` and
-  `SourceAddress` with no `TimedOut`, whereas a real failure populates both.
+Confirmed at the profile level — all three profiles showed `AllowInboundRules = False`
+(the shields-up signature) while remaining enabled with a default-block posture. The
+setting was being asserted by Group Policy (it reappeared after every local override on
+`gpupdate`), which is why local "disable the firewall" tests during earlier sessions had
+appeared to fail: policy simply re-enabled it.
 
-## Configuration management
+## Remediation
 
-- **Local changes that policy can reassert are config drift, not fixes.** A
-  firewall setting fixed locally reverts on the next `gpupdate` if a GPO owns it.
-  Make the change at the policy layer so there's a single source of truth.
-- **Checkpoint reverts silently undo host- and guest-side work** — IP config,
-  adapter rebuilds, DNS settings. Re-verify state after every revert (MAC address
-  is a quick tell).
-- **Secure Boot / TPM / vTPM cannot cause network drops.** They gate boot and
-  credential storage, not packet flow — don't chase them for a connectivity fault.
+All changes were made **in Group Policy**, not on the client, so the configuration has a
+single enforced source of truth (a local override would be config drift — the very thing
+that masked this bug for three sessions). Sequence:
 
-## Expected behavior mistaken for faults
+**1. Snapshot first** (change-management evidence)
+```powershell
+# HOST: checkpoint each VM labeled pre-firewall-remediation
+# CLIENT01: capture before-state
+Get-NetFirewallProfile -PolicyStore ActiveStore |
+  Select Name,Enabled,DefaultInboundAction,AllowInboundRules |
+  Export-Csv C:\Backup\fw-before.csv -NoTypeInformation
+```
 
-- **"The session was disconnected" on VM restart is normal.** VMConnect's enhanced
-  session is RDP-based and is torn down when the guest reboots; the VM stays
-  Running. Reconnect after boot.
-- **Server Manager can show stale role inventory after an update** — verify against
-  `Get-Service`/role cmdlets, which also work over remoting, rather than the
-  dashboard.
-- **A self-signed RDP certificate warning is expected without an internal CA.** It's
-  the host's TLS identity, separate from NLA (which authenticates you). The fix is
-  AD Certificate Services, not clicking through forever.
+**2. Un-shield at the GPO** — *Workstation Firewall Baseline* → WDFAS → Properties:
+- **Domain** and **Private** profiles → Inbound connections → **Block (default)**
+- **Public** profile → left at **Block all connections** (deliberate lockdown for untrusted networks)
+
+**3. Scope RDP to the management source** — the Remote Desktop (TCP-In) and (UDP-In)
+inbound rules → Scope tab → Remote IP address → `192.168.100.10` (DC01 only; widen to the
+static `192.168.100.1–99` range if additional admin hosts are added later).
+
+**4. Harden the remote-access path** — *IT - Local Remote Access* GPO → RDS Session Host:
+- Security → "Require user authentication … using NLA" = **Enabled**; "Set client connection encryption level" = **High Level**
+- Session Time Limits → idle = **15 min**, disconnected = **15 min**
+
+**5. Enable firewall logging** (all three profiles) — log dropped packets + successful
+connections, 16 MB, default `%systemroot%\system32\logfiles\firewall\pfirewall.log`.
+
+**6. Push and verify**
+```powershell
+# CLIENT01 and CLIENT02  (note: /force uses a forward slash)
+gpupdate /force
+```
+
+## Verification
+
+```powershell
+# CLIENT01 — shields-up cleared on managed profiles
+Get-NetFirewallProfile -PolicyStore ActiveStore | ft Name,AllowInboundRules -Auto
+```
+| Profile | AllowInboundRules | Result |
+|---|---|---|
+| Domain | True | ✅ allow rules active |
+| Private | True | ✅ allow rules active |
+| Public | False | ✅ intentional lockdown retained |
+
+**Positive and negative connectivity tests** — the pair together prove the control both
+*works* and *restricts*:
+
+```powershell
+# FROM DC01 (192.168.100.10 — in RDP scope)
+Test-NetConnection 192.168.100.100 -Port 3389
+#   SourceAddress   : 192.168.100.10
+#   TcpTestSucceeded : True         <- RDP reachable
+
+# FROM CLIENT02 (192.168.100.101 — out of RDP scope)
+Test-NetConnection 192.168.100.100 -Port 3389
+#   SourceAddress   : 192.168.100.101
+#   PingSucceeded    : True          <- host still reachable (ICMP allowed)
+#   TcpTestSucceeded : False         <- RDP correctly refused by scope
+```
+
+The CLIENT02 result is the key evidence: **ping succeeds but 3389 is refused**, confirming
+the scoping is surgical — RDP is restricted to the management source without severing
+general connectivity.
+
+Final end-to-end confirmation: `mstsc` → `192.168.100.100`, authenticated as `LAB\jsmith`.
+
+Evidence (screenshots):
+
+![AllowInboundRules before — shields-up on all profiles](screenshots/rdp-remediation/allowinboundrules-before.png)
+![AllowInboundRules after — Domain/Private restored, Public retained](screenshots/rdp-remediation/allowinboundrules-after.png)
+![DC01 → CLIENT01 ping and TCP 3389 succeed (in scope)](screenshots/rdp-remediation/dc01-ping-and-tcp3389-success.png)
+![CLIENT02 → CLIENT01 TCP 3389 refused (out of scope)](screenshots/rdp-remediation/client02-tcp3389-refused.png)
+![jsmith RDP session on CLIENT01](screenshots/rdp-remediation/jsmith-rdp-login.png)
+![Self-signed RDP host certificate warning](screenshots/rdp-remediation/rdp-cert-warning.png)
+
+The root-cause finding itself came from the text `wfpdiag` dump rather than a GUI, so there is no screenshot of the "Shielded Main Rule" filter; the drop analysis above is the record of it.
+
+## Compliance control mapping
+
+Every change maps to a recognized security control. Ordered commercial-first (the
+frameworks a non-defense enterprise cares about); the regulated frameworks are shown as
+a secondary "also maps to" column.
+
+| Control implemented | Verification | CIS v8 / NIST CSF 2.0 / SOC 2 | Also maps to |
+|---|---|---|---|
+| Deny-by-default inbound, allow by exception | `DefaultInboundAction = Block`, allow rules enabled | CIS 4.4/13 · CSF PR.PS · SOC 2 CC6.6 | NIST 800-171 3.13.6 · PCI Req 1 |
+| RDP scoped to management source | positive/negative `Test-NetConnection` | CIS 12 · CSF PR.AA · SOC 2 CC6.1 | 800-171 3.1.14 · PCI Req 7 |
+| Least-privilege remote access (`IT-RemoteAccess`) | `gpresult`, RDP restricted to IT | CIS 6 · CSF PR.AA · SOC 2 CC6.1–6.3 | 800-171 3.1.1/3.1.5 · HIPAA §164.308(a)(4) |
+| NLA required + High encryption | `UserAuthentication = 1` | CIS 3/6 · CSF PR.DS · SOC 2 CC6.7 | 800-171 3.1.13 · HIPAA §164.312(e) |
+| Firewall logging (drop + allow) | `pfirewall.log` populating | CIS 8 · CSF DE.CM · SOC 2 CC7.2 | 800-171 3.3.1 · PCI Req 10 |
+| Idle / disconnected session limits | GPO applied | CIS 4 · CSF PR.AA · SOC 2 CC6.1 | HIPAA §164.312(a)(2)(iii) |
+| GPO-enforced baseline (single source of truth) | change made in GPO, verified via `gpupdate` | CIS 4 · CSF PR.PS · SOC 2 CC8.1 | 800-171 3.4.1/3.4.2 |
+
+> **Scope note:** this lab *implements and verifies the technical controls* underlying the
+> frameworks above. Full compliance additionally requires organizational scope, written
+> policy, risk assessment, and retained evidence over time (SOC 2 Type II).
+
+## Plan of Action & Milestones (open items)
+
+| Item | Rationale | Priority |
+|---|---|---|
+| MFA on administrative / remote access | PCI Req 8.4/8.5 and modern best practice require MFA for admin/remote access; not achievable on-prem without additional tooling (candidate for the Entra phase). | Medium |
+| Explicit "Block" on DefaultInboundAction | Cosmetic — makes verification output read `Block` instead of `NotConfigured`. No functional effect. | Low |
+
+**Completed since this write-up:** the Domain Controller Firewall Baseline GPO is
+now built, with DC logging moved from the local setting into the policy — see
+[DC firewall baseline](DC_Firewall_Baseline.md). Internal RDP host identity is also
+addressed: a CA-issued certificate from the internal Enterprise Root CA replaces
+the self-signed one — see [AD CS](AD_CS_PKI.md).
+
+## Troubleshooting Notes
+
+- **Packet capture ends guessing.** Ten layers were eliminated by inference across two
+  sessions; `pktmon` named the failing *component* in one run, and the `wfpdiag` state dump
+  named the *filter and its provider*. Reach for capture far sooner when a path fails silently.
+- **Read `filterOrigin` / provider before theorizing.** The drops were attributed to exotic
+  causes (NIC binding, third-party driver, stale filter) for two sessions; the dump showed
+  provider `MpsSvc` on every one — the plain built-in firewall in shields-up.
+- **Shielded mode overrides allow rules.** `AllowInboundRules = False` while enabled = "block
+  all incoming connections." Correct allow rules are irrelevant underneath it.
+- **An elimination step is only valid if the rest of the path is known-good at the time.**
+  The early "firewall disabled, still failed" test ran against a policy that re-enabled the
+  firewall on `gpupdate` — the result had to be discarded.
+- **Local changes are config drift.** A setting fixed locally that GPO can reassert is a
+  liability, not a fix. Everything went into the GPO for a single source of truth.
+- **Native exes parse their own flags.** `gpupdate \force` (backslash) is an invalid switch —
+  the tool printed its help screen and *never refreshed policy*, which looked like the fix
+  "not taking." Use `/force`, and confirm "Computer Policy update has completed successfully."
+- **`hostname` first, every time.** VM consoles are visually identical; verify the box before
+  running or trusting any result.
+- **Misspelled properties fail silently; misspelled cmdlets fail loudly.** A blank column is a
+  typo, not "no data." (`-LogMaxSize` silently prefix-matched `-LogMaxSizeKilobytes`; a more
+  ambiguous prefix would have thrown.)
+
+## Production Considerations
+
+- The enterprise posture is **not** "firewall off" — it is firewall **on**, all profiles,
+  default inbound **block**, a *small* set of allow rules **scoped to a management range**,
+  all delivered by **GPO**, with shields-up reserved for the Public profile / incident use.
+- Workstations and domain controllers should have **separate** firewall baselines. Do not put
+  firewall config in the Default Domain Controllers Policy; use a dedicated GPO.
+- Scope remote-access allow rules by **source** (management subnet / jump host), not just by
+  profile. A flat "RDP allowed on Domain profile" is acceptable in a lab, not in production.
+- Firewall logging (`3.3.1` / CC7.2 / CIS 8) is not optional in practice — without it, this
+  incident cost three sessions. With it, it is a five-minute log read.
 
