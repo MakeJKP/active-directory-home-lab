@@ -13,6 +13,34 @@ these GPOs link to the `LabComputers` branch, not `LabUsers`.
 
 ---
 
+## How Group Policy applies — processing order and precedence
+
+Group Policy processes in **LSDOU** order — **L**ocal, then **S**ite, then
+**D**omain, then **O**U (parent OU before child OU). Later stages override earlier
+ones on any conflicting setting, so **the OU closest to the object wins**. Within a
+single OU, **link order** breaks ties — link order 1 has the highest precedence,
+which is exactly why the Domain Password Policy (below) is moved to link order 1 so
+it outranks the Default Domain Policy.
+
+The modifiers that bend that default flow:
+
+- **Enforced** — a GPO's settings win regardless of lower-level links ("closest
+  wins" no longer applies).
+- **Block Inheritance** — stops higher-level GPOs from reaching an OU; an
+  **Enforced** link still gets through.
+- **Security filtering** — a GPO applies only to principals granted Read + Apply
+  (default: Authenticated Users) — the mechanism for scoping a GPO to a group.
+- **WMI filtering** — applies a GPO only where a WMI query is true (e.g. a specific
+  OS version).
+
+Computer settings apply at boot and on refresh; user settings at logon and on
+refresh. Because the GPOs here are Computer Configuration linked to computer OUs,
+they are verified from a **client that sits in the target OU** — a domain
+controller's own `gpresult` never shows OU-targeted policy it is not itself subject
+to.
+
+---
+
 ## GPO 1 — IT - Local Remote Access
 
 *Linked to `OU=IT,OU=LabComputers`. Its job is to let members of the
