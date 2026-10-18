@@ -182,9 +182,14 @@ a secondary "also maps to" column.
 
 | Item | Rationale | Priority |
 |---|---|---|
-| Domain Controller Firewall Baseline GPO (linked to Domain Controllers OU) | DC01's firewall is currently ungoverned by policy; DC logging was set locally (drift). DCs warrant their own hardened baseline, separate from workstations. Migrate the local DC logging change here, then clear the local setting. | High |
 | MFA on administrative / remote access | PCI Req 8.4/8.5 and modern best practice require MFA for admin/remote access; not achievable on-prem without additional tooling (candidate for the Entra phase). | Medium |
 | Explicit "Block" on DefaultInboundAction | Cosmetic — makes verification output read `Block` instead of `NotConfigured`. No functional effect. | Low |
+
+**Completed since this write-up:** the Domain Controller Firewall Baseline GPO is
+now built, with DC logging moved from the local setting into the policy — see
+[DC firewall baseline](DC_Firewall_Baseline.md). Internal RDP host identity is also
+addressed: a CA-issued certificate from the internal Enterprise Root CA replaces
+the self-signed one — see [AD CS](AD_CS_PKI.md).
 
 ## Troubleshooting Notes
 
