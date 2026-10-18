@@ -307,12 +307,13 @@ connection.*
 *Domain controllers warrant their own firewall baseline GPO, separate from
 workstations and linked to the Domain Controllers OU. Firewall configuration does
 not belong in the Default Domain Controllers Policy, which is reserved for the DC
-account and security settings.*
+account and security settings. This is now implemented — see the
+[DC firewall baseline](DC_Firewall_Baseline.md).*
 
-*RDP currently trusts a self-signed host certificate (the certificate warning on
-first connect). A production environment issues RDP host certificates from an
-internal CA (AD Certificate Services) via auto-enrollment, so host identity is
-verified automatically and the warning disappears.*
+*RDP host identity is now secured by a CA-issued certificate from the internal
+Enterprise Root CA, auto-enrolled to each host and bound to the RDP listener by
+GPO — so the first-connect certificate warning is gone and host identity is
+verified automatically. See the [AD CS write-up](AD_CS_PKI.md).*
 
 *Multi-factor authentication for administrative and remote access is a
 requirement under most frameworks (e.g. PCI DSS) and modern best practice; it is
