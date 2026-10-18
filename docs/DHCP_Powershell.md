@@ -56,7 +56,7 @@
   Get-DnsServerForwarder
 ```
 
-*Note: with the second network adapter removed from DC01 (see troubleshooting below), the server currently has no route to these upstream resolvers. Internal resolution for lab.local is unaffected. External forwarding will become functional once a NAT switch is configured.*
+*Note: these forwarders now resolve external names — the lab reaches the internet through host-based NAT (gateway 192.168.100.1), so queries the DC is not authoritative for are forwarded upstream successfully. See the [NAT write-up](NAT_Internet.md). Internal resolution for lab.local is authoritative on the DC regardless.*
 
 *Create a DHCP backup.*
 ```powershell
@@ -205,7 +205,7 @@ healthy from both sides, not just the primary.
 
 ### Multihomed domain controller removed
 
-*DC01 was initially configured with a second network adapter to provide internet access for updates. Server Manager subsequently reported the server with two addresses: 192.168.100.10 and a 169.254.x.x APIPA address from the second adapter. Beyond the APIPA symptom, the underlying issue was that the domain controller was multihomed. A domain controller with adapters on multiple networks registers all of its addresses in DNS, and clients may then attempt to reach it on an address they cannot route to, producing intermittent authentication and Group Policy failures. The second adapter was removed in favor of a single isolated adapter, with external routing planned through a NAT switch instead. DNS records were re-registered and verified afterward.*
+*DC01 was initially configured with a second network adapter to provide internet access for updates. Server Manager subsequently reported the server with two addresses: 192.168.100.10 and a 169.254.x.x APIPA address from the second adapter. Beyond the APIPA symptom, the underlying issue was that the domain controller was multihomed. A domain controller with adapters on multiple networks registers all of its addresses in DNS, and clients may then attempt to reach it on an address they cannot route to, producing intermittent authentication and Group Policy failures. The second adapter was removed in favor of a single isolated adapter, with external routing now provided through host-based NAT instead (see the [NAT write-up](NAT_Internet.md)). DNS records were re-registered and verified afterward.*
 ```powershell
   Get-NetAdapter
   Get-NetIPAddress -AddressFamily IPv4 | Select-Object InterfaceAlias, IPAddress, PrefixOrigin
@@ -272,4 +272,4 @@ healthy from both sides, not just the primary.
 
 ## Production Considerations
 
-*DHCP dynamic DNS registration should run under a dedicated service account rather than the domain controller machine account. Scope options in this lab omit a default gateway because the internal virtual switch provides no route off the subnet; a production scope would include option 003. A production environment would also configure DHCP failover between two servers so that address assignment survives the loss of a single host.*
+*DHCP dynamic DNS registration should run under a dedicated service account rather than the domain controller machine account. The scope now hands a default gateway (option 003 → 192.168.100.1) so clients route to the internet through host-based NAT. DHCP failover between DC01 and MS01 is configured so address assignment survives the loss of a single host — see the DHCP Failover section above.*
