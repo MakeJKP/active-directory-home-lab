@@ -2,8 +2,8 @@
 
 A consolidated index of the recurring lessons from building this lab — the
 mistakes that cost real time and the habits adopted to avoid repeating them.
-Per-incident detail lives in the topic docs ([DC01/AD](DC01_Powershell.md),
-[DHCP](DHCP_Powershell.md), [Group Policy](GroupPolicy.md),
+Per-incident detail lives in the topic docs ([DC01/AD](Active_Directory.md),
+[DHCP](DHCP.md), [Group Policy](GroupPolicy.md),
 [RDP remediation](RDP_Firewall_Remediation.md)); this file is the cross-cutting
 summary.
 
