@@ -1,8 +1,8 @@
 # Active Directory Home Lab
 
-A Windows Server domain built from scratch in Hyper-V to practice and document core system administration work: Active Directory, DNS, DHCP, Group Policy, file services, PowerShell automation, and security hardening.
+This is a Windows Server domain I built from scratch in Hyper-V to practice and document core system administration work: Active Directory, DNS, DHCP, Group Policy, file services, PowerShell automation, and security hardening.
 
-Every configuration step in this lab was performed and documented in PowerShell or Group Policy rather than through one-off GUI wizards, so the build is repeatable and the reasoning behind each step is recorded. Security controls are mapped to recognized frameworks (CIS Controls, NIST CSF, SOC 2) so the work reads as production practice, not just "it works."
+Every configuration step in this lab was performed and documented in PowerShell or Group Policy rather than through one-off GUI wizards, so the build is repeatable and the reasoning behind each step is recorded. Security controls are mapped to recognized frameworks (CIS Controls, NIST CSF, SOC 2) so it is designed aiming at best practice, not just "it works."
 
 ---
 
